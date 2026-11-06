@@ -1,0 +1,9 @@
+{
+  "name": "GatherTweaks",
+  "version_number": "1.0.0",
+  "website_url": "",
+  "description": "Picked berries, mushrooms and the like go straight into your inventory, picking no longer slows you down, and trees fall the way you are looking. Client-side.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2351"
+  ]
+}
