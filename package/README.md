@@ -24,6 +24,8 @@ Small quality-of-life changes for gathering. What you pick goes straight into yo
 
 **r2modman / Thunderstore Mod Manager:** click *Install*. To install a downloaded zip, go to Settings → *Import local mod*.
 
+**Nexus Mods / Vortex:** also on [Nexus Mods](https://www.nexusmods.com/valheim/mods/4897).
+
 **Manual:**
 1. Extract the zip.
 2. Copy the `plugins/GatherTweaks` folder into `Valheim/BepInEx/plugins/`.
@@ -69,6 +71,8 @@ Pequenas melhorias para a coleta. O que você colhe vai direto para o inventári
 ### Instalação
 
 **r2modman / Thunderstore Mod Manager:** clique em *Install*. Para instalar um zip baixado, use Configurações → *Import local mod*.
+
+**Nexus Mods / Vortex:** também está no [Nexus Mods](https://www.nexusmods.com/valheim/mods/4897).
 
 **À mão:**
 1. Extraia o zip.
