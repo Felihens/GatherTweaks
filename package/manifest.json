@@ -1,6 +1,6 @@
 {
   "name": "GatherTweaks",
-  "version_number": "1.0.0",
+  "version_number": "1.1.0",
   "website_url": "https://github.com/Felihens/GatherTweaks",
   "description": "Picked berries, mushrooms and the like go straight into your inventory, picking no longer slows you down, and trees fall the way you are looking. Client-side.",
   "dependencies": [

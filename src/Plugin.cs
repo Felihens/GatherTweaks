@@ -15,7 +15,7 @@ namespace GatherTweaks
     {
         public const string GUID = "felih.GatherTweaks";
         public const string NAME = "Gather Tweaks";
-        public const string VERSION = "1.0.0";
+        public const string VERSION = "1.1.0";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<SlowdownMode> NoSlowdown;
@@ -59,7 +59,7 @@ namespace GatherTweaks
         private const float Window = 2.5f;   // seconds after picking during which drops are collected
         private const float Radius = 3f;     // metres around the picked object
         internal static float LastPickTime = -100f;
-        private static Vector3 _lastPickPos;
+        internal static Vector3 _lastPickPos;
         private static readonly List<ItemDrop> Pending = new List<ItemDrop>();
         private static readonly MethodInfo RequestOwn = AccessTools.Method(typeof(ItemDrop), "RequestOwn");
 
@@ -116,6 +116,7 @@ namespace GatherTweaks
         [HarmonyPostfix]
         private static void Spawned(ItemDrop __instance)
         {
+            if (Extractors.Capture(__instance)) return;
             if (!Plugin.DirectToInventory.Value || Time.time - LastPickTime > Window) return;
             Pending.Add(__instance);
             Plugin.Debug("[pick] drop seen: " + __instance.name);
@@ -156,6 +157,108 @@ namespace GatherTweaks
                 // If it didn't fit, keep trying until the window ends; then it simply stays on the ground.
             }
         }
+    }
+
+    // Beehives and sap collectors: the owner's game drops the honey/sap when you collect.
+    // When that's your own game and you asked, every item it drops during that call goes
+    // straight into your inventory. The game's own code still runs (level reset, effects).
+    [HarmonyPatch]
+    internal static class Extractors
+    {
+        private static bool _capturing;
+        private static readonly List<ItemDrop> Caught = new List<ItemDrop>();
+
+        internal static bool Capture(ItemDrop d)
+        {
+            if (!_capturing) return false;
+            Caught.Add(d);
+            return true;
+        }
+
+        private static void Start(long caller, Component source)
+        {
+            Caught.Clear();
+            _capturing = Plugin.DirectToInventory.Value && Player.m_localPlayer != null && caller == ZNet.GetUID();
+        }
+
+        private static void Finish(string what)
+        {
+            if (!_capturing) return;
+            _capturing = false;
+            Player p = Player.m_localPlayer;
+            foreach (ItemDrop d in Caught)
+            {
+                if (d == null || p == null) continue;
+                string name = d.m_itemData.m_shared.m_name + " x" + d.m_itemData.m_stack;
+                if (p.Pickup(d.gameObject, false, false))
+                    Plugin.Debug("[" + what + "] to inventory (direct): " + name);
+                else
+                    Plugin.Debug("[" + what + "] didn't fit, left on the ground: " + name);
+            }
+            Caught.Clear();
+        }
+
+        // Someone else's game handles it: fall back to grabbing the drops near it.
+        private static void Interacted(Component c, Humanoid user)
+        {
+            if (user == null || user != Player.m_localPlayer || !Plugin.DirectToInventory.Value) return;
+            Picking.LastPickTime = Time.time;
+            Picking._lastPickPos = c.transform.position;
+        }
+
+        [HarmonyPatch(typeof(Beehive), "Interact")]
+        [HarmonyPostfix]
+        private static void HiveUsed(Beehive __instance, Humanoid character) { Interacted(__instance, character); }
+
+        [HarmonyPatch(typeof(Beehive), "RPC_Extract")]
+        [HarmonyPrefix]
+        private static void HiveStart(Beehive __instance, long caller) { Start(caller, __instance); }
+
+        [HarmonyPatch(typeof(Beehive), "RPC_Extract")]
+        [HarmonyFinalizer]
+        private static void HiveEnd() { Finish("beehive"); }
+
+        [HarmonyPatch(typeof(SapCollector), "Interact")]
+        [HarmonyPostfix]
+        private static void SapUsed(SapCollector __instance, Humanoid character) { Interacted(__instance, character); }
+
+        [HarmonyPatch(typeof(SapCollector), "RPC_Extract")]
+        [HarmonyPrefix]
+        private static void SapStart(SapCollector __instance, long caller) { Start(caller, __instance); }
+
+        [HarmonyPatch(typeof(SapCollector), "RPC_Extract")]
+        [HarmonyFinalizer]
+        private static void SapEnd() { Finish("sap"); }
+    }
+
+    // Multiplayer: a bush, beehive or sap collector is run by one player's game (usually whoever got
+    // to that area first). Only when that's your own game can the items go straight into your bag,
+    // so take it over right before you pick. The game hands objects between players like this all the time.
+    [HarmonyPatch]
+    internal static class Ownership
+    {
+        private static void Take(ZNetView nview, Humanoid user, string what)
+        {
+            if (!Plugin.DirectToInventory.Value || user == null || user != Player.m_localPlayer) return;
+            if (nview == null || !nview.IsValid() || nview.IsOwner()) return;
+            nview.ClaimOwnership();
+            Plugin.Debug("[" + what + "] took it over from another player's game, so it goes straight to you");
+        }
+
+        [HarmonyPatch(typeof(Pickable), "Interact")]
+        [HarmonyPrefix]
+        [HarmonyPriority(Priority.High)]
+        private static void Pick(Humanoid character, ZNetView ___m_nview) { Take(___m_nview, character, "pick"); }
+
+        [HarmonyPatch(typeof(Beehive), "Interact")]
+        [HarmonyPrefix]
+        [HarmonyPriority(Priority.High)]
+        private static void Hive(Humanoid character, ZNetView ___m_nview) { Take(___m_nview, character, "beehive"); }
+
+        [HarmonyPatch(typeof(SapCollector), "Interact")]
+        [HarmonyPrefix]
+        [HarmonyPriority(Priority.High)]
+        private static void Sap(Humanoid character, ZNetView ___m_nview) { Take(___m_nview, character, "sap"); }
     }
 
     // No slowdown: short actions (picking, equipping) normally force walking speed.
