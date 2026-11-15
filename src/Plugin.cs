@@ -15,10 +15,11 @@ namespace GatherTweaks
     {
         public const string GUID = "felih.GatherTweaks";
         public const string NAME = "Gather Tweaks";
-        public const string VERSION = "1.1.0";
+        public const string VERSION = "1.2.0";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<SlowdownMode> NoSlowdown;
+        internal static ConfigEntry<bool> SwitchWhileRunning;
         internal static ConfigEntry<bool> DirectToInventory;
         internal static ConfigEntry<bool> TreeFallsWhereYouLook;
         internal static ConfigEntry<float> TreeFallPush;
@@ -29,6 +30,9 @@ namespace GatherTweaks
             Log = Logger;
             NoSlowdown = Config.Bind("1 - Movement", "NoSlowdown", SlowdownMode.Picking,
                 "Removes the walk-speed slowdown of short actions. Picking = only when picking berries, mushrooms, stones and the like. AllActions = also when equipping and other short actions. Off = vanilla.");
+            SwitchWhileRunning = Config.Bind("1 - Movement", "SwitchWhileRunning", false,
+                "OFF by default. When on, you can switch weapons and tools while running: the game no longer cancels the switch " +
+                "when you run, and you keep your running speed while it happens.");
             DirectToInventory = Config.Bind("2 - Picking", "DirectToInventory", true,
                 "What you pick goes straight into your inventory. If it doesn't fit, it drops on the ground as usual.");
             TreeFallsWhereYouLook = Config.Bind("3 - Trees", "FallWhereYouLook", true,
@@ -269,10 +273,79 @@ namespace GatherTweaks
         [HarmonyPrefix]
         private static bool NoSlow(Player __instance, ref bool __result)
         {
+            if (__instance != Player.m_localPlayer) return true;
+            if (Running.Switching(__instance))
+            {
+                __result = false;
+                return false;
+            }
             SlowdownMode mode = Plugin.NoSlowdown.Value;
-            if (mode == SlowdownMode.Off || __instance != Player.m_localPlayer) return true;
+            if (mode == SlowdownMode.Off) return true;
             if (mode == SlowdownMode.Picking && Time.time - Picking.LastPickTime > 1.5f) return true;
             __result = false;
+            return false;
+        }
+    }
+
+    // Switching weapons while running: every frame you run, Player.CheckRun empties the queue of
+    // short actions, so a weapon switch never finishes. While running, keep the equip/unequip
+    // actions and only drop the others (crossbow reload), as the game does.
+    [HarmonyPatch]
+    internal static class Running
+    {
+        private const int Equip = 0, Unequip = 1;   // Player.MinorActionData.ActionType
+        private static readonly FieldInfo QueueField = AccessTools.Field(typeof(Player), "m_actionQueue");
+        private static FieldInfo _typeField;
+        private static bool _inRun;
+
+        private static int TypeOf(object action)
+        {
+            if (_typeField == null) _typeField = AccessTools.Field(action.GetType(), "m_type");
+            return System.Convert.ToInt32(_typeField.GetValue(action));
+        }
+
+        private static bool IsSwitch(object action)
+        {
+            int t = TypeOf(action);
+            return t == Equip || t == Unequip;
+        }
+
+        // True while the local player's current short action is a weapon switch, and for a moment after it
+        // (the equip animation goes on after the switch leaves the queue), so the run keeps its speed.
+        private const float AnimTail = 1.2f;
+        private static float _switchUntil;
+
+        internal static bool Switching(Player p)
+        {
+            if (!Plugin.SwitchWhileRunning.Value || p == null) return false;
+            System.Collections.IList q = QueueField != null ? QueueField.GetValue(p) as System.Collections.IList : null;
+            if (q != null && q.Count > 0 && IsSwitch(q[0])) { _switchUntil = Time.time + AnimTail; return true; }
+            return Time.time < _switchUntil;
+        }
+
+        [HarmonyPatch(typeof(Player), "CheckRun")]
+        [HarmonyPrefix]
+        private static void RunStart(Player __instance)
+        {
+            _inRun = __instance == Player.m_localPlayer && Plugin.SwitchWhileRunning.Value;
+        }
+
+        [HarmonyPatch(typeof(Player), "CheckRun")]
+        [HarmonyFinalizer]
+        private static void RunEnd()
+        {
+            _inRun = false;
+        }
+
+        [HarmonyPatch(typeof(Player), "ClearActionQueue")]
+        [HarmonyPrefix]
+        private static bool KeepSwitch(Player __instance)
+        {
+            if (!_inRun || QueueField == null) return true;
+            System.Collections.IList q = QueueField.GetValue(__instance) as System.Collections.IList;
+            if (q == null || q.Count == 0) return false;
+            for (int i = q.Count - 1; i >= 0; i--)
+                if (!IsSwitch(q[i])) q.RemoveAt(i);
             return false;
         }
     }
